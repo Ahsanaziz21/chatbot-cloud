@@ -1,0 +1,219 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template for Cloud-Based Chatbot System deployment'
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t2.micro
+    Description: EC2 instance type
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t2.medium
+      - t3.micro
+      - t3.small
+
+  Environment:
+    Type: String
+    Default: development
+    Description: Environment name
+    AllowedValues:
+      - development
+      - staging
+      - production
+
+  KeyPairName:
+    Type: String
+    Description: Name of an existing EC2 KeyPair
+
+Resources:
+  # VPC
+  ChatbotVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: chatbot-vpc
+
+  # Subnet
+  ChatbotSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ChatbotVPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+
+  # Internet Gateway
+  ChatbotInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: chatbot-igw
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref ChatbotVPC
+      InternetGatewayId: !Ref ChatbotInternetGateway
+
+  # Route Table
+  ChatbotRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref ChatbotVPC
+
+  ChatbotRoute:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref ChatbotRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref ChatbotInternetGateway
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref ChatbotSubnet
+      RouteTableId: !Ref ChatbotRouteTable
+
+  # Security Group
+  ChatbotSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for Chatbot application
+      VpcId: !Ref ChatbotVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP access
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS access
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+          Description: Application port
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH access
+      Tags:
+        - Key: Name
+          Value: chatbot-sg
+
+  # IAM Role
+  ChatbotEC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Tags:
+        - Key: Name
+          Value: chatbot-ec2-role
+
+  ChatbotInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref ChatbotEC2Role
+
+  # EC2 Instance
+  ChatbotEC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0885b1f6bd170450c  # Ubuntu 20.04 LTS (us-east-1)
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyPairName
+      IamInstanceProfile: !Ref ChatbotInstanceProfile
+      SubnetId: !Ref ChatbotSubnet
+      SecurityGroupIds:
+        - !Ref ChatbotSecurityGroup
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          set -e
+          
+          # Update system
+          apt-get update
+          apt-get upgrade -y
+          
+          # Install Node.js
+          curl -fsSL https://deb.nodesource.com/setup_16.x | sudo -E bash -
+          apt-get install -y nodejs
+          
+          # Install Docker
+          apt-get install -y docker.io
+          systemctl start docker
+          systemctl enable docker
+          
+          # Create app directory
+          mkdir -p /app
+          cd /app
+          
+          # Clone or download application
+          # git clone https://github.com/yourusername/cloud-chatbot.git .
+          
+          # Install dependencies
+          npm install
+          
+          # Start application
+          npm start
+      Tags:
+        - Key: Name
+          Value: chatbot-ec2-instance
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Elastic IP
+  ChatbotElasticIP:
+    Type: AWS::EC2::EIP
+    DependsOn: AttachGateway
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref ChatbotEC2Instance
+      Tags:
+        - Key: Name
+          Value: chatbot-eip
+
+Outputs:
+  VPCId:
+    Description: VPC ID
+    Value: !Ref ChatbotVPC
+
+  SubnetId:
+    Description: Subnet ID
+    Value: !Ref ChatbotSubnet
+
+  SecurityGroupId:
+    Description: Security Group ID
+    Value: !Ref ChatbotSecurityGroup
+
+  EC2InstanceId:
+    Description: EC2 Instance ID
+    Value: !Ref ChatbotEC2Instance
+
+  PublicIP:
+    Description: Public IP of EC2 Instance
+    Value: !Ref ChatbotElasticIP
+
+  ApplicationURL:
+    Description: Application URL
+    Value: !Sub 'http://${ChatbotElasticIP}:3000'

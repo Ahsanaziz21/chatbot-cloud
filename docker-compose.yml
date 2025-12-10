@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:5.0
+    container_name: chatbot-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: chatbot
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - chatbot-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend API Server
+  backend:
+    build:
+      context: .
+      dockerfile: deployment/Dockerfile
+    container_name: chatbot-backend
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: mongodb://admin:password123@mongodb:27017/chatbot?authSource=admin
+      CLIENT_URL: http://localhost:8080
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - chatbot-network
+    volumes:
+      - ./server:/app
+    command: npm start
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Frontend Web Server (optional, for serving static files)
+  frontend:
+    image: nginx:latest
+    container_name: chatbot-frontend
+    ports:
+      - "8080:80"
+    volumes:
+      - ./client/public:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - backend
+    networks:
+      - chatbot-network
+
+volumes:
+  mongodb_data:
+    driver: local
+
+networks:
+  chatbot-network:
+    driver: bridge

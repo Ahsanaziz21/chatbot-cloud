@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "name": "cloud-chatbot-full",
+  "builds": [
+    { "src": "client/public/**", "use": "@vercel/static" },
+    { "src": "api/**/*.js", "use": "@vercel/node" }
+  ],
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/api/$1" },
+    { "src": "/(.*)", "dest": "/client/public/$1" }
+  ]
+}
