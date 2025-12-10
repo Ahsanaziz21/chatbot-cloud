@@ -5,8 +5,11 @@ class ChatbotUI {
         this.chatBox = document.getElementById('chat-box');
         this.userInput = document.getElementById('user-input');
         this.sendButton = document.getElementById('send-button');
-        // Use relative path so frontend works when deployed to Vercel
-        this.apiEndpoint = '/api/messages';
+        // Determine API endpoint from meta tag or global, fallback to localhost server
+        const apiMeta = document.querySelector('meta[name="api-endpoint"]');
+        this.apiEndpoint = (apiMeta && apiMeta.content)
+            ? apiMeta.content
+            : (window.API_ENDPOINT || 'http://localhost:3000/api/messages');
 
         this.init();
     }
